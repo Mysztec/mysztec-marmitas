@@ -133,6 +133,7 @@ Crie um projeto no Supabase e rode, **na ordem**, os arquivos de
 1. [`0001_schema.sql`](supabase/migrations/0001_schema.sql) — tabelas, índices, policies, triggers, realtime e configuração inicial
 2. [`0002_security.sql`](supabase/migrations/0002_security.sql) — hash de PIN, RPCs de reserva/retirada e demais travas
 3. [`0003_fix_pin_enrollment.sql`](supabase/migrations/0003_fix_pin_enrollment.sql) — corrige o `search_path` das funções de PIN e restringe o cadastro da senha à reserva
+4. [`0004_pin_reset.sql`](supabase/migrations/0004_pin_reset.sql) — redefinição de senha pelo administrador, com auditoria
 
 ### 2. Variáveis de ambiente
 
@@ -271,6 +272,33 @@ nenhum dos dois.
 | Nome interpolado cru no relatório impresso | XSS armazenado | `escapeHtml` com teste |
 | Papel `anon` com acesso ao schema | Leitura sem login | `REVOKE ALL ... FROM anon` |
 
+### Ciclo de vida da senha do funcionário
+
+O sistema é desenhado para que **ninguém além do próprio funcionário conheça o
+seu PIN** — nem o RH que o cadastra, nem o dono.
+
+| Momento | O que acontece |
+|---|---|
+| RH cadastra a pessoa | Deixa o campo de senha vazio |
+| Funcionário reserva pela 1ª vez | O PIN que ele digitar vira a senha dele |
+| Uso normal | O PIN é conferido no banco contra o hash bcrypt |
+| Errou 5 vezes em 15 min | Bloqueado; o admin libera com um clique, sem apagar a senha |
+| Esqueceu a senha | O admin **apaga** a senha e abre uma janela de 30 min para a pessoa cadastrar outra no totem |
+
+O administrador nunca escolhe uma senha. `reset_employee_pin()` apaga o hash e
+grava `pin_enroll_until = agora + 30 min`; dentro dessa janela o funcionário
+cadastra a nova senha em qualquer fase do dia, e a janela fecha no primeiro uso.
+Cada redefinição é registrada em `pin_resets` com autor e horário.
+
+`set_employee_pin()` continua existindo para o caso em que o admin precisa
+mesmo definir a senha (alguém que não consegue ir até o totem), mas não é o
+caminho normal e a tela não o oferece.
+
+**O risco que sobra, declarado:** enquanto a janela está aberta, a primeira
+senha digitada naquele nome passa a valer. É por isso que ela dura 30 minutos e
+não um dia — e a confirmação na tela avisa o administrador para só redefinir
+com a pessoa presente.
+
 ### Detalhe de implantação que custou caro
 
 As funções de PIN nasceram com `set search_path = public`. No Supabase a
@@ -308,11 +336,9 @@ ler perfis/papeis        -> 401  permission denied
   força bruta, mas o espaço é de 10 mil combinações. Trocar por 6 dígitos é uma
   mudança de uma linha na validação, ponderada contra o uso em totem.
 - **Primeiro PIN informado passa a valer** quando o funcionário ainda não tem
-  um — e isso é intencional: o RH cadastra a pessoa sem senha e ela mesma
-  define a sua na primeira reserva, sem precisar dizer o PIN a ninguém. O
-  contrapeso é que quem chegar primeiro naquele nome define o PIN. A janela
-  fecha no primeiro uso, vale **apenas na reserva** (a retirada exige PIN já
-  cadastrado) e some se o admin cadastrar o PIN pelo painel.
+  um — intencional, e detalhado em
+  [Ciclo de vida da senha](#ciclo-de-vida-da-senha-do-funcionário). O risco
+  residual é a janela em que quem digitar primeiro define o PIN daquele nome.
 - **A rota `/admin` é protegida no cliente** por conveniência de navegação. Não
   é a fronteira de segurança — quem garante o acesso são as policies de RLS,
   que valem mesmo se alguém digitar a URL direto ou chamar a API sem passar

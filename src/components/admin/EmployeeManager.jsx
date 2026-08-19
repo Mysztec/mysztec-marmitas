@@ -8,9 +8,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Pencil, Trash2, UserPlus, Search, Eye, EyeOff } from 'lucide-react';
+import { Plus, Pencil, Trash2, UserPlus, Search, Eye, EyeOff, KeyRound, LockOpen } from 'lucide-react';
 import { toast } from 'sonner';
-import { definirPinDoFuncionario, mensagemDeErro } from '@/lib/mealActions';
+import {
+  definirPinDoFuncionario,
+  redefinirPinDoFuncionario,
+  mensagemDeErro,
+} from '@/lib/mealActions';
+import ResetPinDialog from '@/components/admin/ResetPinDialog';
 
 /** A RPC recusa devolvendo {ok:false}; sem isto a falha passaria despercebida. */
 async function gravarPin(employeeId, pin) {
@@ -18,7 +23,27 @@ async function gravarPin(employeeId, pin) {
   if (!r?.ok) throw new Error(mensagemDeErro(r?.error));
 }
 
+/** Mostra em que pe esta a senha, sem nunca revelar o PIN. */
+function BadgeSenha({ employee }) {
+  const janelaAberta =
+    employee.pin_enroll_until && new Date(employee.pin_enroll_until) > new Date();
+
+  if (janelaAberta) {
+    return (
+      <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1">
+        <LockOpen className="w-3 h-3" />
+        Aguardando cadastro
+      </Badge>
+    );
+  }
+  if (!employee.pin_hash) {
+    return <Badge variant="outline" className="text-muted-foreground">Não cadastrada</Badge>;
+  }
+  return <Badge variant="secondary">Cadastrada</Badge>;
+}
+
 export default function EmployeeManager({ filterUnitId = null }) {
+  const [resetting, setResetting] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
@@ -137,6 +162,7 @@ export default function EmployeeManager({ filterUnitId = null }) {
               <TableHead>Departamento</TableHead>
               <TableHead>Unidade</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Senha</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>
@@ -151,7 +177,17 @@ export default function EmployeeManager({ filterUnitId = null }) {
                     {emp.active !== false ? 'Ativo' : 'Inativo'}
                   </Badge>
                 </TableCell>
+                <TableCell>
+                  <BadgeSenha employee={emp} />
+                </TableCell>
                 <TableCell className="text-right">
+                  <Button
+                    variant="ghost" size="icon"
+                    title="Redefinir senha"
+                    onClick={() => setResetting(emp)}
+                  >
+                    <KeyRound className="w-4 h-4 text-muted-foreground" />
+                  </Button>
                   <Button variant="ghost" size="icon" onClick={() => openEdit(emp)}>
                     <Pencil className="w-4 h-4" />
                   </Button>
@@ -169,6 +205,18 @@ export default function EmployeeManager({ filterUnitId = null }) {
           </TableBody>
         </Table>
       </div>
+
+      <ResetPinDialog
+        employee={resetting}
+        onOpenChange={(aberto) => { if (!aberto) setResetting(null); }}
+        onConfirm={async (emp) => {
+          const r = await redefinirPinDoFuncionario(emp.id);
+          if (!r?.ok) throw new Error(mensagemDeErro(r?.error));
+          queryClient.invalidateQueries({ queryKey: ['employees-all'] });
+          queryClient.invalidateQueries({ queryKey: ['employees'] });
+          return r;
+        }}
+      />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">

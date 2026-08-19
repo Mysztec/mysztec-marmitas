@@ -37,3 +37,16 @@ export async function retirarMarmita(employeeId, pin) {
 export async function definirPinDoFuncionario(employeeId, pin) {
   return db.rpc('set_employee_pin', { p_employee: employeeId, p_pin: pin });
 }
+
+/**
+ * Apaga o PIN e abre a janela para o funcionario cadastrar um novo no totem.
+ * O administrador nunca escolhe nem ve a senha.
+ */
+export async function redefinirPinDoFuncionario(employeeId) {
+  return db.rpc('reset_employee_pin', { p_employee: employeeId });
+}
+
+/** Libera quem estourou o limite de tentativas, sem apagar o PIN. */
+export async function desbloquearFuncionario(employeeId) {
+  return db.rpc('unlock_employee_pin', { p_employee: employeeId });
+}
