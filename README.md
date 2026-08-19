@@ -33,8 +33,11 @@ O dia opera em **fases automáticas**, definidas por horário:
 | `done` | após 13:30 | Quem reservou e não retirou é marcado e recebe a taxa |
 | `locked` | qualquer hora | Trava manual do administrador |
 
-Os horários são configuráveis. A transição entre fases é calculada a cada
-segundo no cliente, com a regra isolada em [`src/lib/schedule.js`](src/lib/schedule.js).
+Os horários são configuráveis. A fase é calculada nos dois lados, de propósito:
+no cliente a cada segundo, para a tela reagir sozinha
+([`src/lib/schedule.js`](src/lib/schedule.js)); e no banco, em
+`public.current_phase()`, que é quem realmente decide se uma reserva pode ser
+gravada. O cálculo do cliente é conveniência de interface, não autorização.
 
 ## Funcionalidades
 
@@ -68,7 +71,7 @@ segundo no cliente, com a regra isolada em [`src/lib/schedule.js`](src/lib/sched
 ### Autorização mora no banco, não na tela
 
 Toda regra de acesso é uma **policy de Row Level Security** no PostgreSQL
-([`supabase/schema.sql`](supabase/schema.sql)). O front-end nunca é a fronteira de
+([`supabase/migrations/`](supabase/migrations)). O front-end nunca é a fronteira de
 segurança: mesmo que alguém chame a API diretamente, o banco recusa.
 
 Três papéis:
@@ -124,9 +127,11 @@ a caixa não existe.
 
 ### 1. Banco de dados
 
-Crie um projeto no Supabase e rode [`supabase/schema.sql`](supabase/schema.sql)
-inteiro no **SQL Editor**. Ele cria tabelas, índices, policies, triggers,
-realtime e a configuração inicial.
+Crie um projeto no Supabase e rode, **na ordem**, os arquivos de
+[`supabase/migrations/`](supabase/migrations) no **SQL Editor**:
+
+1. [`0001_schema.sql`](supabase/migrations/0001_schema.sql) — tabelas, índices, policies, triggers, realtime e configuração inicial
+2. [`0002_security.sql`](supabase/migrations/0002_security.sql) — hash de PIN, RPCs de reserva/retirada e demais travas
 
 ### 2. Variáveis de ambiente
 
@@ -138,11 +143,13 @@ Preencha com os valores de **Project Settings → API**:
 
 ```
 VITE_SUPABASE_URL=https://xxxxxxxx.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOi...
+VITE_SUPABASE_ANON_KEY=sb_publishable_xxxxxxxx
 ```
 
-> A `anon key` é pública por design — quem protege os dados são as policies de RLS.
-> A `service_role key` **nunca** entra no `.env` do front-end.
+> A chave publicável (ou a `anon` legada) é pública por design — vai no bundle do
+> front-end. Quem protege os dados são as policies de RLS.
+> A `service_role` / `secret key` **nunca** entra no `.env` do front-end: ela só
+> existe na Edge Function, injetada pelo próprio Supabase.
 
 ### 3. Primeiro usuário
 
@@ -215,10 +222,87 @@ de alguém ter o sistema aberto após o horário de retirada. A função
 `close_pending_reservations()` no banco resolve isso de forma confiável — o hook
 segue como fallback.
 
+---
+
+## Segurança
+
+O sistema nasceu numa plataforma low-code, onde parte das travas era
+declarativa e parte simplesmente não existia. Uma auditoria feita após a
+migração encontrou falhas reais; a correção está em
+[`0002_security.sql`](supabase/migrations/0002_security.sql).
+
+### A falha principal
+
+O PIN dos funcionários ficava em texto plano numa tabela que **qualquer usuário
+autenticado podia ler**, e era conferido com uma comparação em JavaScript:
+
+```js
+if (pin !== selectedEmployee.pin) return { error: 'Senha incorreta' };
+```
+
+Duas consequências: o PIN de todos os funcionários era baixado para cada
+navegador que abrisse o sistema, e a conferência acontecia no cliente — ou
+seja, não conferia nada. Bastava uma chamada direta à API, com a chave pública
+que vai no bundle, para reservar ou dar baixa em nome de qualquer pessoa.
+
+Hoje o PIN é hash bcrypt, a coluna em texto plano não existe mais, e a decisão
+acontece no banco:
+
+```sql
+select public.reserve_meal(p_employee := '...', p_pin := '1234');
+```
+
+A função confere PIN, janela de horário, unidade do funcionário e bloqueio do
+sistema numa transação. Data e status vêm do servidor: o cliente não escolhe
+nenhum dos dois.
+
+### Demais correções
+
+| Falha | Risco | Correção |
+|---|---|---|
+| PIN em texto plano e legível por todos | Personificar qualquer funcionário | Hash bcrypt; coluna removida |
+| PIN conferido no cliente | Reserva/retirada sem PIN via API | RPC `SECURITY DEFINER` |
+| Sem limite de tentativas | PIN de 4 dígitos por força bruta | 5 erros em 15 min bloqueiam |
+| Cliente escolhia `date` e `status` | Reserva retroativa, baixa forjada | Definidos no servidor |
+| `admin` podia se promover a `dono` | Burlar o desbloqueio exclusivo do dono | Trigger `guard_role_escalation` |
+| `close_pending_reservations` exposta na API | Cobrar taxa de todos de uma vez | `REVOKE EXECUTE`; roda por `pg_cron` |
+| Escrita livre em `meal_reservations` | Alterar reserva alheia da mesma unidade | Escrita direta só para admin |
+| Nome interpolado cru no relatório impresso | XSS armazenado | `escapeHtml` com teste |
+| Papel `anon` com acesso ao schema | Leitura sem login | `REVOKE ALL ... FROM anon` |
+
+### Verificação
+
+Contra a API pública, sem sessão, as seis tentativas são recusadas:
+
+```
+ler coluna pin           -> 400  column employees.pin does not exist
+ler funcionarios         -> 401  permission denied
+fechar o dia             -> 401  permission denied for function
+checar PIN direto        -> 401  permission denied for function
+ler tentativas de PIN    -> 401  permission denied
+ler perfis/papeis        -> 401  permission denied
+```
+
+### O que continua sendo risco
+
+- **PIN de 4 dígitos** é fraco por natureza. O bloqueio por tentativas limita a
+  força bruta, mas o espaço é de 10 mil combinações. Trocar por 6 dígitos é uma
+  mudança de uma linha na validação, ponderada contra o uso em totem.
+- **Primeiro PIN informado passa a valer** quando o funcionário ainda não tem
+  um. Comportamento herdado, mantido para não travar o cadastro em campo: quem
+  chegar primeiro define o PIN daquela pessoa. Cadastrar o PIN pelo painel
+  fecha essa janela.
+- **A rota `/admin` é protegida no cliente** por conveniência de navegação. Não
+  é a fronteira de segurança — quem garante o acesso são as policies de RLS,
+  que valem mesmo se alguém digitar a URL direto ou chamar a API sem passar
+  pela interface.
+- **Não há testes automatizados das policies de RLS.** É a maior lacuna da
+  suíte: as verificações acima foram feitas à mão.
+
+---
+
 ## Limitações conhecidas
 
 - O bundle passa de 500 KB; falta code-splitting por rota.
-- Não há testes de integração contra um Postgres real — as policies de RLS são
-  verificadas manualmente. É a lacuna mais relevante da suíte.
 - `useEndOfDayProcessor` mantém a execução no cliente; o agendamento via `pg_cron`
   precisa ser habilitado manualmente no projeto Supabase.
