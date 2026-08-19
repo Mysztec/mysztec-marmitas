@@ -80,7 +80,13 @@ export default function MealStation() {
 
   const createReservation = useMutation({
     mutationFn: ({ employeeId, pin }) => reservarMarmita(employeeId, pin),
-    onSuccess: (r) => { if (r?.ok) finalizar('Marmita reservada com sucesso!'); },
+    onSuccess: (r) => {
+      if (!r?.ok) return;
+      // `enrolled` indica que o funcionario acabou de definir a propria senha.
+      finalizar(r.enrolled
+        ? 'Senha cadastrada e marmita reservada!'
+        : 'Marmita reservada com sucesso!');
+    },
   });
 
   const updateReservation = useMutation({

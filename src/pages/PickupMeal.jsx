@@ -33,7 +33,8 @@ export default function PickupMeal() {
 
   const updateReservation = useMutation({
     mutationFn: ({ employeeId, pin }) => retirarMarmita(employeeId, pin),
-    onSuccess: () => {
+    onSuccess: (r) => {
+      if (!r?.ok) return;
       queryClient.invalidateQueries({ queryKey: ['reservations', today] });
       setPinOpen(false);
       setSelectedEmployee(null);

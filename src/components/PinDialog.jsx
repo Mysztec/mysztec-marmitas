@@ -75,25 +75,34 @@ export default function PinDialog({ open, onOpenChange, employeeName, onConfirm,
     setPin(prev => prev.slice(0, -1));
   }, [loading]);
 
-  // Auto-submit on 4th digit
+  // Envia sozinho ao completar o 4o digito.
   useEffect(() => {
-    if (pin.length === 4 && !confirmingRef.current) {
-      confirmingRef.current = true;
-      onConfirm(pin).then(result => {
+    if (pin.length !== 4 || confirmingRef.current) return;
+    confirmingRef.current = true;
+
+    const recusar = (mensagem) => {
+      setError(mensagem);
+      setPin('');
+      triggerShake();
+      confirmingRef.current = false;
+    };
+
+    onConfirm(pin)
+      .then(result => {
         if (result?.error) {
-          setError(result.error || 'PIN Incorreto');
-          setPin('');
-          triggerShake();
-          confirmingRef.current = false;
-        } else {
-          setSuccess(true);
-          playBeep('success');
-          setTimeout(() => {
-            confirmingRef.current = false;
-          }, 600);
+          recusar(result.error || 'PIN incorreto');
+          return;
         }
+        setSuccess(true);
+        playBeep('success');
+        setTimeout(() => { confirmingRef.current = false; }, 600);
+      })
+      // Sem este catch, uma falha inesperada deixava confirmingRef travado em
+      // true: o teclado parava de responder e nenhuma mensagem aparecia.
+      .catch(erro => {
+        console.error('Falha ao confirmar o PIN:', erro);
+        recusar('Erro de conexão. Tente novamente.');
       });
-    }
   }, [pin]);
 
   // Keyboard support

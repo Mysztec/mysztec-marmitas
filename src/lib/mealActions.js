@@ -18,6 +18,7 @@ const ERROS = {
   ja_reservado: 'Este funcionario ja reservou hoje.',
   sem_reserva: 'Nenhuma reserva encontrada para hoje.',
   sem_permissao: 'Voce nao tem permissao para esta acao.',
+  sem_pin_cadastrado: 'Este funcionario ainda nao definiu uma senha. Ela e criada na primeira reserva.',
   pin_invalido: 'O PIN precisa ter 4 digitos.',
 };
 

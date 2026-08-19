@@ -47,11 +47,14 @@ export default function ReserveMeal() {
 
   const createReservation = useMutation({
     mutationFn: ({ employeeId, pin }) => reservarMarmita(employeeId, pin),
-    onSuccess: () => {
+    onSuccess: (r) => {
+      if (!r?.ok) return;
       queryClient.invalidateQueries({ queryKey: ['reservations', today] });
       setPinOpen(false);
       setSelectedEmployee(null);
-      toast.success('Marmita reservada com sucesso!');
+      toast.success(r.enrolled
+        ? 'Senha cadastrada e marmita reservada!'
+        : 'Marmita reservada com sucesso!');
     },
   });
 

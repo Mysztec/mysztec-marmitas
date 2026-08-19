@@ -10,7 +10,13 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Pencil, Trash2, UserPlus, Search, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
-import { definirPinDoFuncionario } from '@/lib/mealActions';
+import { definirPinDoFuncionario, mensagemDeErro } from '@/lib/mealActions';
+
+/** A RPC recusa devolvendo {ok:false}; sem isto a falha passaria despercebida. */
+async function gravarPin(employeeId, pin) {
+  const r = await definirPinDoFuncionario(employeeId, pin);
+  if (!r?.ok) throw new Error(mensagemDeErro(r?.error));
+}
 
 export default function EmployeeManager({ filterUnitId = null }) {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -33,7 +39,7 @@ export default function EmployeeManager({ filterUnitId = null }) {
   const createMutation = useMutation({
     mutationFn: async ({ dados, pin }) => {
       const criado = await db.entities.Employee.create(dados);
-      if (pin) await definirPinDoFuncionario(criado.id, pin);
+      if (pin) await gravarPin(criado.id, pin);
       return criado;
     },
     onSuccess: () => {
@@ -42,12 +48,13 @@ export default function EmployeeManager({ filterUnitId = null }) {
       setDialogOpen(false);
       toast.success('Funcionário cadastrado!');
     },
+    onError: (erro) => toast.error(erro.message),
   });
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data, pin }) => {
       const atualizado = await db.entities.Employee.update(id, data);
-      if (pin) await definirPinDoFuncionario(id, pin);
+      if (pin) await gravarPin(id, pin);
       return atualizado;
     },
     onSuccess: () => {
@@ -56,6 +63,7 @@ export default function EmployeeManager({ filterUnitId = null }) {
       setDialogOpen(false);
       toast.success('Funcionário atualizado!');
     },
+    onError: (erro) => toast.error(erro.message),
   });
 
   const deleteMutation = useMutation({

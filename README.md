@@ -132,6 +132,7 @@ Crie um projeto no Supabase e rode, **na ordem**, os arquivos de
 
 1. [`0001_schema.sql`](supabase/migrations/0001_schema.sql) — tabelas, índices, policies, triggers, realtime e configuração inicial
 2. [`0002_security.sql`](supabase/migrations/0002_security.sql) — hash de PIN, RPCs de reserva/retirada e demais travas
+3. [`0003_fix_pin_enrollment.sql`](supabase/migrations/0003_fix_pin_enrollment.sql) — corrige o `search_path` das funções de PIN e restringe o cadastro da senha à reserva
 
 ### 2. Variáveis de ambiente
 
@@ -270,6 +271,24 @@ nenhum dos dois.
 | Nome interpolado cru no relatório impresso | XSS armazenado | `escapeHtml` com teste |
 | Papel `anon` com acesso ao schema | Leitura sem login | `REVOKE ALL ... FROM anon` |
 
+### Detalhe de implantação que custou caro
+
+As funções de PIN nasceram com `set search_path = public`. No Supabase a
+extensão `pgcrypto` vive no schema `extensions`, então `crypt()` e `gen_salt()`
+ficavam invisíveis dentro delas e a chamada estourava com
+`function gen_salt(unknown) does not exist`.
+
+O erro só apareceu em produção porque a migração em si roda como `postgres`,
+cujo `search_path` padrão já inclui `extensions` — o `UPDATE` de conversão dos
+PINs funcionou, e só a execução via API falhava. A correção está em
+[`0003`](supabase/migrations/0003_fix_pin_enrollment.sql).
+
+O sintoma no front foi pior que o erro: o teclado de PIN travava sem mensagem,
+porque o `.then()` que tratava a resposta não tinha `.catch()`. Uma promessa
+rejeitada deixava a trava de reentrância presa em `true`. Vale a regra geral —
+**toda promessa que controla estado de UI precisa de tratamento de falha**, ou
+um erro de rede vira tela morta.
+
 ### Verificação
 
 Contra a API pública, sem sessão, as seis tentativas são recusadas:
@@ -289,9 +308,11 @@ ler perfis/papeis        -> 401  permission denied
   força bruta, mas o espaço é de 10 mil combinações. Trocar por 6 dígitos é uma
   mudança de uma linha na validação, ponderada contra o uso em totem.
 - **Primeiro PIN informado passa a valer** quando o funcionário ainda não tem
-  um. Comportamento herdado, mantido para não travar o cadastro em campo: quem
-  chegar primeiro define o PIN daquela pessoa. Cadastrar o PIN pelo painel
-  fecha essa janela.
+  um — e isso é intencional: o RH cadastra a pessoa sem senha e ela mesma
+  define a sua na primeira reserva, sem precisar dizer o PIN a ninguém. O
+  contrapeso é que quem chegar primeiro naquele nome define o PIN. A janela
+  fecha no primeiro uso, vale **apenas na reserva** (a retirada exige PIN já
+  cadastrado) e some se o admin cadastrar o PIN pelo painel.
 - **A rota `/admin` é protegida no cliente** por conveniência de navegação. Não
   é a fronteira de segurança — quem garante o acesso são as policies de RLS,
   que valem mesmo se alguém digitar a URL direto ou chamar a API sem passar
