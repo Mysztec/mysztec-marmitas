@@ -8,23 +8,27 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Pencil, Trash2, UserPlus, Search, Eye, EyeOff, KeyRound, LockOpen } from 'lucide-react';
+import { Pencil, Trash2, UserPlus, Search, KeyRound, LockOpen, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  definirPinDoFuncionario,
   redefinirPinDoFuncionario,
+  desbloquearFuncionario,
+  funcionariosBloqueados,
   mensagemDeErro,
 } from '@/lib/mealActions';
 import ResetPinDialog from '@/components/admin/ResetPinDialog';
 
-/** A RPC recusa devolvendo {ok:false}; sem isto a falha passaria despercebida. */
-async function gravarPin(employeeId, pin) {
-  const r = await definirPinDoFuncionario(employeeId, pin);
-  if (!r?.ok) throw new Error(mensagemDeErro(r?.error));
-}
-
 /** Mostra em que pe esta a senha, sem nunca revelar o PIN. */
-function BadgeSenha({ employee }) {
+function BadgeSenha({ employee, bloqueado }) {
+  if (bloqueado) {
+    return (
+      <Badge variant="outline" className="border-destructive text-destructive gap-1">
+        <ShieldAlert className="w-3 h-3" />
+        Bloqueada
+      </Badge>
+    );
+  }
+
   const janelaAberta =
     employee.pin_enroll_until && new Date(employee.pin_enroll_until) > new Date();
 
@@ -47,8 +51,7 @@ export default function EmployeeManager({ filterUnitId = null }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
-  const [form, setForm] = useState({ name: '', pin: '', department: '', active: true, unidade_id: '' });
-  const [showPin, setShowPin] = useState(false);
+  const [form, setForm] = useState({ name: '', department: '', active: true, unidade_id: '' });
   const queryClient = useQueryClient();
 
   const { data: employees = [] } = useQuery({
@@ -61,12 +64,28 @@ export default function EmployeeManager({ filterUnitId = null }) {
     queryFn: () => db.entities.Unidade.list(),
   });
 
-  const createMutation = useMutation({
-    mutationFn: async ({ dados, pin }) => {
-      const criado = await db.entities.Employee.create(dados);
-      if (pin) await gravarPin(criado.id, pin);
-      return criado;
+  // Quem estourou o limite de tentativas. Recalculado a cada minuto porque o
+  // bloqueio expira sozinho depois de 15 minutos.
+  const { data: bloqueados = new Set() } = useQuery({
+    queryKey: ['funcionarios-bloqueados'],
+    queryFn: funcionariosBloqueados,
+    refetchInterval: 60_000,
+  });
+
+  const unlockMutation = useMutation({
+    mutationFn: async (id) => {
+      const r = await desbloquearFuncionario(id);
+      if (!r?.ok) throw new Error(mensagemDeErro(r?.error));
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['funcionarios-bloqueados'] });
+      toast.success('Funcionário desbloqueado!');
+    },
+    onError: (erro) => toast.error(erro.message),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (dados) => db.entities.Employee.create(dados),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees-all'] });
       queryClient.invalidateQueries({ queryKey: ['employees'] });
@@ -77,11 +96,7 @@ export default function EmployeeManager({ filterUnitId = null }) {
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, data, pin }) => {
-      const atualizado = await db.entities.Employee.update(id, data);
-      if (pin) await gravarPin(id, pin);
-      return atualizado;
-    },
+    mutationFn: ({ id, data }) => db.entities.Employee.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees-all'] });
       queryClient.invalidateQueries({ queryKey: ['employees'] });
@@ -102,16 +117,13 @@ export default function EmployeeManager({ filterUnitId = null }) {
 
   const openNew = () => {
     setEditing(null);
-    setForm({ name: '', pin: '', department: '', active: true, unidade_id: filterUnitId || '' });
-    setShowPin(false);
+    setForm({ name: '', department: '', active: true, unidade_id: filterUnitId || '' });
     setDialogOpen(true);
   };
 
   const openEdit = (emp) => {
     setEditing(emp);
-    // O PIN nunca volta do servidor: o campo fica vazio e so grava se for preenchido.
-    setForm({ name: emp.name, pin: '', department: emp.department || '', active: emp.active !== false, unidade_id: emp.unidade_id || '' });
-    setShowPin(false);
+    setForm({ name: emp.name, department: emp.department || '', active: emp.active !== false, unidade_id: emp.unidade_id || '' });
     setDialogOpen(true);
   };
 
@@ -121,17 +133,10 @@ export default function EmployeeManager({ filterUnitId = null }) {
       toast.error('Nome é obrigatório');
       return;
     }
-    if (form.pin && form.pin.length !== 4) {
-      toast.error('A senha deve ter exatamente 4 dígitos');
-      return;
-    }
-    // O PIN nao trafega junto com o resto: vai por uma funcao do banco que o
-    // guarda como hash. A tabela nao tem mais coluna de PIN em texto plano.
-    const { pin, ...dados } = form;
     if (editing) {
-      updateMutation.mutate({ id: editing.id, data: dados, pin });
+      updateMutation.mutate({ id: editing.id, data: form });
     } else {
-      createMutation.mutate({ dados, pin });
+      createMutation.mutate(form);
     }
   };
 
@@ -178,9 +183,19 @@ export default function EmployeeManager({ filterUnitId = null }) {
                   </Badge>
                 </TableCell>
                 <TableCell>
-                  <BadgeSenha employee={emp} />
+                  <BadgeSenha employee={emp} bloqueado={bloqueados.has(emp.id)} />
                 </TableCell>
                 <TableCell className="text-right">
+                  {bloqueados.has(emp.id) && (
+                    <Button
+                      variant="ghost" size="icon"
+                      title="Desbloquear (mantém a senha atual)"
+                      onClick={() => unlockMutation.mutate(emp.id)}
+                      disabled={unlockMutation.isPending}
+                    >
+                      <LockOpen className="w-4 h-4 text-destructive" />
+                    </Button>
+                  )}
                   <Button
                     variant="ghost" size="icon"
                     title="Redefinir senha"
@@ -214,6 +229,7 @@ export default function EmployeeManager({ filterUnitId = null }) {
           if (!r?.ok) throw new Error(mensagemDeErro(r?.error));
           queryClient.invalidateQueries({ queryKey: ['employees-all'] });
           queryClient.invalidateQueries({ queryKey: ['employees'] });
+          queryClient.invalidateQueries({ queryKey: ['funcionarios-bloqueados'] });
           return r;
         }}
       />
@@ -228,23 +244,15 @@ export default function EmployeeManager({ filterUnitId = null }) {
               <Label>Nome completo</Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nome do funcionário" />
             </div>
-            <div className="space-y-2">
-              <Label>Senha (4 dígitos) <span className="text-muted-foreground font-normal">— deixe vazio para manter a atual</span></Label>
-              <div className="relative">
-                <Input
-                  type={showPin ? 'text' : 'password'}
-                  inputMode="numeric"
-                  maxLength={4}
-                  value={form.pin}
-                  onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, '') })}
-                  placeholder="0000"
-                  className="pr-10"
-                />
-                <button type="button" onClick={() => setShowPin(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                  {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
+            {!editing && (
+              <div className="flex gap-2 items-start bg-accent/50 border border-border rounded-xl p-3 text-sm">
+                <KeyRound className="w-4 h-4 mt-0.5 shrink-0 text-primary" />
+                <span className="text-muted-foreground">
+                  A senha não é definida aqui. O próprio funcionário digita a dele
+                  na primeira reserva, e ninguém mais fica sabendo qual é.
+                </span>
               </div>
-            </div>
+            )}
             <div className="space-y-2">
               <Label>Departamento</Label>
               <Input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} placeholder="Ex: Produção" />
