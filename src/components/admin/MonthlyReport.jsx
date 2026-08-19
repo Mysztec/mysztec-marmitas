@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { format } from 'date-fns';
 import { FileDown } from 'lucide-react';
 import { exportPayrollCsv, downloadCsv } from '@/lib/exportCsv';
+import { escapeHtml } from '@/lib/escapeHtml';
 
 function generateMonthlyPDF(employeeStats, reservations, appSettings, globalSettings, month) {
   const mealPrice = globalSettings.preco_marmita || 0;
@@ -18,7 +19,7 @@ function generateMonthlyPDF(employeeStats, reservations, appSettings, globalSett
 
   const rows = employeeStats.map(s => `
     <tr>
-      <td>${s.name}</td>
+      <td>${escapeHtml(s.name)}</td>
       <td style="text-align:center">${s.total}</td>
       <td style="text-align:center;color:#16a34a">${s.pickedUp}</td>
       <td style="text-align:center;color:#dc2626">${s.notPickedUp}</td>

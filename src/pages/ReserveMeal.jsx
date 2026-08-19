@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
+import { reservarMarmita, mensagemDeErro } from '@/lib/mealActions';
 import EmployeeCard from '../components/EmployeeCard';
 import PinDialog from '../components/PinDialog';
 import PageHeader from '../components/PageHeader';
@@ -45,7 +46,7 @@ export default function ReserveMeal() {
   }, [appSettings.reservation_deadline]);
 
   const createReservation = useMutation({
-    mutationFn: (data) => db.entities.MealReservation.create(data),
+    mutationFn: ({ employeeId, pin }) => reservarMarmita(employeeId, pin),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['reservations', today] });
       setPinOpen(false);
@@ -71,17 +72,14 @@ export default function ReserveMeal() {
     setPinOpen(true);
   };
 
+  // O PIN nao e conferido aqui: quem decide e o banco. O navegador nunca
+  // recebe o PIN de ninguem, so o veredito da RPC.
   const handleConfirmPin = async (pin) => {
-    if (pin !== selectedEmployee.pin) {
-      return { error: 'Senha incorreta' };
-    }
-    await createReservation.mutateAsync({
-      employee_id: selectedEmployee.id,
-      employee_name: selectedEmployee.name,
-      date: today,
-      status: 'reserved',
-      reserved_at: new Date().toISOString(),
+    const resultado = await createReservation.mutateAsync({
+      employeeId: selectedEmployee.id,
+      pin,
     });
+    if (!resultado?.ok) return { error: mensagemDeErro(resultado?.error) };
     return {};
   };
 

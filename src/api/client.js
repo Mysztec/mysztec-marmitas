@@ -171,5 +171,18 @@ const auth = {
   },
 };
 
-export const db = { entities, auth };
+/**
+ * Chama uma funcao do banco.
+ *
+ * Reserva e retirada passam por aqui em vez de escrever direto na tabela: a
+ * conferencia do PIN, a janela de horario e a unidade sao decididas no
+ * servidor, onde o cliente nao alcanca.
+ */
+const rpc = async (fn, args = {}) => {
+  const { data, error } = await supabase.rpc(fn, args);
+  if (error) throw Object.assign(new Error(error.message), { code: error.code });
+  return data;
+};
+
+export const db = { entities, auth, rpc };
 export default db;

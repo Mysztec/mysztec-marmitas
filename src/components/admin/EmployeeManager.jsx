@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Pencil, Trash2, UserPlus, Search, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
+import { definirPinDoFuncionario } from '@/lib/mealActions';
 
 export default function EmployeeManager({ filterUnitId = null }) {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -17,7 +18,6 @@ export default function EmployeeManager({ filterUnitId = null }) {
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({ name: '', pin: '', department: '', active: true, unidade_id: '' });
   const [showPin, setShowPin] = useState(false);
-  const [visiblePins, setVisiblePins] = useState({});
   const queryClient = useQueryClient();
 
   const { data: employees = [] } = useQuery({
@@ -31,7 +31,11 @@ export default function EmployeeManager({ filterUnitId = null }) {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data) => db.entities.Employee.create(data),
+    mutationFn: async ({ dados, pin }) => {
+      const criado = await db.entities.Employee.create(dados);
+      if (pin) await definirPinDoFuncionario(criado.id, pin);
+      return criado;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees-all'] });
       queryClient.invalidateQueries({ queryKey: ['employees'] });
@@ -41,7 +45,11 @@ export default function EmployeeManager({ filterUnitId = null }) {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }) => db.entities.Employee.update(id, data),
+    mutationFn: async ({ id, data, pin }) => {
+      const atualizado = await db.entities.Employee.update(id, data);
+      if (pin) await definirPinDoFuncionario(id, pin);
+      return atualizado;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees-all'] });
       queryClient.invalidateQueries({ queryKey: ['employees'] });
@@ -68,7 +76,8 @@ export default function EmployeeManager({ filterUnitId = null }) {
 
   const openEdit = (emp) => {
     setEditing(emp);
-    setForm({ name: emp.name, pin: emp.pin, department: emp.department || '', active: emp.active !== false, unidade_id: emp.unidade_id || '' });
+    // O PIN nunca volta do servidor: o campo fica vazio e so grava se for preenchido.
+    setForm({ name: emp.name, pin: '', department: emp.department || '', active: emp.active !== false, unidade_id: emp.unidade_id || '' });
     setShowPin(false);
     setDialogOpen(true);
   };
@@ -83,10 +92,13 @@ export default function EmployeeManager({ filterUnitId = null }) {
       toast.error('A senha deve ter exatamente 4 dígitos');
       return;
     }
+    // O PIN nao trafega junto com o resto: vai por uma funcao do banco que o
+    // guarda como hash. A tabela nao tem mais coluna de PIN em texto plano.
+    const { pin, ...dados } = form;
     if (editing) {
-      updateMutation.mutate({ id: editing.id, data: form });
+      updateMutation.mutate({ id: editing.id, data: dados, pin });
     } else {
-      createMutation.mutate(form);
+      createMutation.mutate({ dados, pin });
     }
   };
 
@@ -132,15 +144,6 @@ export default function EmployeeManager({ filterUnitId = null }) {
                   </Badge>
                 </TableCell>
                 <TableCell className="text-right">
-                  <Button
-                    variant="ghost" size="icon"
-                    onClick={() => setVisiblePins(prev => ({ ...prev, [emp.id]: !prev[emp.id] }))}
-                    title={visiblePins[emp.id] ? 'Ocultar senha' : 'Ver senha'}
-                  >
-                    {visiblePins[emp.id]
-                      ? <span className="text-xs font-mono font-bold text-primary">{emp.pin}</span>
-                      : <Eye className="w-4 h-4 text-muted-foreground" />}
-                  </Button>
                   <Button variant="ghost" size="icon" onClick={() => openEdit(emp)}>
                     <Pencil className="w-4 h-4" />
                   </Button>
@@ -170,7 +173,7 @@ export default function EmployeeManager({ filterUnitId = null }) {
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nome do funcionário" />
             </div>
             <div className="space-y-2">
-              <Label>Senha (4 dígitos) <span className="text-muted-foreground font-normal">— opcional, será definida na 1ª reserva</span></Label>
+              <Label>Senha (4 dígitos) <span className="text-muted-foreground font-normal">— deixe vazio para manter a atual</span></Label>
               <div className="relative">
                 <Input
                   type={showPin ? 'text' : 'password'}

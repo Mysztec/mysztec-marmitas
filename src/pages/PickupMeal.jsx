@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
+import { retirarMarmita, mensagemDeErro } from '@/lib/mealActions';
 import EmployeeCard from '../components/EmployeeCard';
 import PinDialog from '../components/PinDialog';
 import PageHeader from '../components/PageHeader';
@@ -31,7 +32,7 @@ export default function PickupMeal() {
   todayReservations.forEach(r => { reservationMap[r.employee_id] = r; });
 
   const updateReservation = useMutation({
-    mutationFn: ({ id, data }) => db.entities.MealReservation.update(id, data),
+    mutationFn: ({ employeeId, pin }) => retirarMarmita(employeeId, pin),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['reservations', today] });
       setPinOpen(false);
@@ -57,15 +58,13 @@ export default function PickupMeal() {
     setPinOpen(true);
   };
 
+  // Conferencia do PIN e baixa da reserva acontecem numa transacao no banco.
   const handleConfirmPin = async (pin) => {
-    if (pin !== selectedEmployee.pin) {
-      return { error: 'Senha incorreta' };
-    }
-    const reservation = reservationMap[selectedEmployee.id];
-    await updateReservation.mutateAsync({
-      id: reservation.id,
-      data: { status: 'picked_up', picked_up_at: new Date().toISOString() },
+    const resultado = await updateReservation.mutateAsync({
+      employeeId: selectedEmployee.id,
+      pin,
     });
+    if (!resultado?.ok) return { error: mensagemDeErro(resultado?.error) };
     return {};
   };
 

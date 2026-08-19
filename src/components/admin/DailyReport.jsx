@@ -12,8 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { format } from 'date-fns';
 import { Send, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
+import { escapeHtml } from '@/lib/escapeHtml';
 import { downloadCsv } from '@/lib/exportCsv';
-import { useEndOfDayProcessor } from '@/hooks/useEndOfDayProcessor';
 
 function generateDailyPDF(reservations, appSettings, globalSettings, selectedDate) {
   const dateFormatted = format(new Date(selectedDate + 'T12:00:00'), "dd/MM/yyyy");
@@ -30,7 +30,7 @@ function generateDailyPDF(reservations, appSettings, globalSettings, selectedDat
 
   const rows = reservations.map(r => `
     <tr>
-      <td>${r.employee_name}</td>
+      <td>${escapeHtml(r.employee_name)}</td>
       <td>${r.reserved_at ? format(new Date(r.reserved_at), 'HH:mm') : '—'}</td>
       <td>${r.picked_up_at ? format(new Date(r.picked_up_at), 'HH:mm') : '—'}</td>
       <td>${statusLabel[r.status] || r.status}</td>
@@ -81,7 +81,6 @@ const STATUS_LABELS = {
 };
 
 export default function DailyReport() {
-  useEndOfDayProcessor();
 
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [filterEmployee, setFilterEmployee] = useState('__all__');

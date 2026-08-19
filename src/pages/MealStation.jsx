@@ -6,13 +6,13 @@ import { Input } from '@/components/ui/input';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
+import { reservarMarmita, retirarMarmita, mensagemDeErro } from '@/lib/mealActions';
 import EmployeeCard from '../components/EmployeeCard';
 import PinDialog from '../components/PinDialog';
 import AdminMenuButton from '../components/AdminMenuButton';
 import SystemStepper from '../components/SystemStepper';
 import { useGlobalSettings } from '@/hooks/useGlobalSettings';
 import { useUnitScope } from '@/hooks/useUnitScope';
-import { useEndOfDayProcessor } from '@/hooks/useEndOfDayProcessor';
 import InfoNotices from '../components/InfoNotices';
 import SystemBlockedScreen from '../components/SystemBlockedScreen';
 
@@ -34,7 +34,6 @@ export default function MealStation() {
   const isDono = currentUser?.role === 'dono';
 
   const { filterByUnit } = useUnitScope();
-  useEndOfDayProcessor();
 
   const { data: allEmployees = [] } = useQuery({
     queryKey: ['employees'],
@@ -71,26 +70,22 @@ export default function MealStation() {
   // Mode: reserve window open → reserve; pickup window open → pickup
   const isReserveMode = phase === 'reserve';
 
+  const finalizar = (mensagem) => {
+    queryClient.invalidateQueries({ queryKey: ['reservations', today] });
+    setPinOpen(false);
+    setSelectedEmployee(null);
+    setSearch('');
+    toast.success(mensagem);
+  };
+
   const createReservation = useMutation({
-    mutationFn: (data) => db.entities.MealReservation.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reservations', today] });
-      setPinOpen(false);
-      setSelectedEmployee(null);
-      setSearch('');
-      toast.success('Marmita reservada com sucesso!');
-    },
+    mutationFn: ({ employeeId, pin }) => reservarMarmita(employeeId, pin),
+    onSuccess: (r) => { if (r?.ok) finalizar('Marmita reservada com sucesso!'); },
   });
 
   const updateReservation = useMutation({
-    mutationFn: ({ id, data }) => db.entities.MealReservation.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reservations', today] });
-      setPinOpen(false);
-      setSelectedEmployee(null);
-      setSearch('');
-      toast.success('Retirada confirmada!');
-    },
+    mutationFn: ({ employeeId, pin }) => retirarMarmita(employeeId, pin),
+    onSuccess: (r) => { if (r?.ok) finalizar('Retirada confirmada!'); },
   });
 
   const handleReserveClick = (employee) => {
@@ -110,30 +105,12 @@ export default function MealStation() {
     setPinOpen(true);
   };
 
+  // Toda a decisao (PIN, janela de horario, unidade, bloqueio do sistema)
+  // acontece no banco. O navegador so mostra o veredito.
   const handleConfirmPin = async (pin) => {
-    // Se funcionário não tem PIN, registra o PIN digitado como senha permanente
-    if (!selectedEmployee.pin) {
-      await db.entities.Employee.update(selectedEmployee.id, { pin });
-      queryClient.invalidateQueries({ queryKey: ['employees'] });
-    } else if (pin !== selectedEmployee.pin) {
-      return { error: 'Senha incorreta' };
-    }
-    if (activeAction === 'reserve') {
-      await createReservation.mutateAsync({
-        employee_id: selectedEmployee.id,
-        employee_name: selectedEmployee.name,
-        date: today,
-        status: 'reserved',
-        reserved_at: new Date().toISOString(),
-        unidade_id: selectedEmployee.unidade_id || '',
-      });
-    } else {
-      const reservation = reservationMap[selectedEmployee.id];
-      await updateReservation.mutateAsync({
-        id: reservation.id,
-        data: { status: 'picked_up', picked_up_at: new Date().toISOString() },
-      });
-    }
+    const mutation = activeAction === 'reserve' ? createReservation : updateReservation;
+    const resultado = await mutation.mutateAsync({ employeeId: selectedEmployee.id, pin });
+    if (!resultado?.ok) return { error: mensagemDeErro(resultado?.error) };
     return {};
   };
 
