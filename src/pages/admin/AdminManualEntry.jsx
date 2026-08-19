@@ -10,8 +10,6 @@ import { Badge } from '@/components/ui/badge';
 import { Search, Check, ClipboardList, CalendarDays, Users, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 
-const ALLOWED_EMAIL = 'admin@example.com';
-
 export default function AdminManualEntry() {
   const queryClient = useQueryClient();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -103,7 +101,11 @@ export default function AdminManualEntry() {
     );
   }
 
-  if (!user || user.email?.toLowerCase() !== ALLOWED_EMAIL) {
+  // Lancamento manual cria reservas retroativas e por isso e restrito ao dono.
+  // A checagem por papel substituiu um e-mail fixo no codigo: identidade nao e
+  // autorizacao, e a regra precisava valer tambem no banco (policies de RLS),
+  // nao apenas nesta tela.
+  if (user?.role !== 'dono') {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
         <div className="w-16 h-16 rounded-2xl bg-destructive/10 flex items-center justify-center">
@@ -111,7 +113,7 @@ export default function AdminManualEntry() {
         </div>
         <p className="text-lg font-semibold text-foreground">Acesso restrito</p>
         <p className="text-sm text-muted-foreground max-w-xs">
-          Esta tela é exclusiva para um usuário autorizado. Contate o administrador se precisar de acesso.
+          Esta tela é exclusiva para o dono do sistema. Contate-o se precisar de acesso.
         </p>
       </div>
     );
