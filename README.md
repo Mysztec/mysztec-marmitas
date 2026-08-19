@@ -1,5 +1,11 @@
 # Mysztec Marmitas
 
+[![CI](https://github.com/Mysztec/mysztec-marmitas/actions/workflows/ci.yml/badge.svg)](https://github.com/Mysztec/mysztec-marmitas/actions/workflows/ci.yml)
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Supabase-3ECF8E?logo=supabase&logoColor=white)
+![Vitest](https://img.shields.io/badge/tests-28%20passing-success?logo=vitest&logoColor=white)
+
 Sistema de controle de reserva e retirada de marmitas corporativas, usado para
 organizar o almoço de funcionários distribuídos em múltiplas unidades (barracões).
 
